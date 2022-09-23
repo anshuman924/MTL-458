@@ -246,6 +246,22 @@ unsigned char read_mem(int pid, int vmem_addr)
 void write_mem(int pid, int vmem_addr, unsigned char byte) 
 {
     // TODO: student
+    int vpn = vmem_addr/PAGE_SIZE;
+    int offset = (vmem_addr & ((1 << 12) - 1));
+
+    int key = ((pid << 10) + vpn) << 2;
+    unsigned int value = OS_MEM[key];
+
+    // printf("%d %d %d %d %d\n", value, is_present(value), is_executable(value), is_writeable(value), is_readable(value));
+
+    if(is_present(value) && is_writeable(value)) {
+        int pfn = value >> 4;
+        int address = pfn * PAGE_SIZE + offset;
+        PS_MEM[address] = byte;
+    } else {
+        error_no = ERR_SEG_FAULT;
+        exit_ps(pid);
+    }
 }
 
 
@@ -266,7 +282,7 @@ int pte_to_frame_num(page_table_entry pte)
 // 0 otherwise
 int is_readable(page_table_entry pte) {
     // TODO: student
-    if(pte & 1 > 0) 
+    if((pte & 1) > 0) 
         return 1;
     return 0;
 }
@@ -275,7 +291,7 @@ int is_readable(page_table_entry pte) {
 // 0 otherwise
 int is_writeable(page_table_entry pte) {
     // TODO: student
-    if(pte & 2 > 0)
+    if((pte & 2) > 0)
         return 1;
     return 0;
 }
@@ -284,7 +300,7 @@ int is_writeable(page_table_entry pte) {
 // 0 otherwise
 int is_executable(page_table_entry pte) {
     // TODO: student
-    if(pte & 4 > 0)
+    if((pte & 4) > 0)
         return 1;
     return 0;
 }
@@ -294,7 +310,7 @@ int is_executable(page_table_entry pte) {
 // 0 otherwise
 int is_present(page_table_entry pte) {
     // TODO: student
-    if(pte & 8 > 0)
+    if((pte & 8) > 0)
         return 1; 
     return 0;
 }
