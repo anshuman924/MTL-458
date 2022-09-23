@@ -1,6 +1,7 @@
 #include "mmu.h"
 #include <stdlib.h>
 #include <stdio.h>
+#include <string.h>
 
 
 // byte addressable memory
@@ -35,9 +36,51 @@ int error_no;
 void os_init() {
     // TODO student 
     // initialize your data structures.
+
+    memset(RAM, 0, RAM_SIZE * sizeof(unsigned char));
 }
 
+// MY FUNCTIONS
 
+void setMem(int pid, int page, int frame, int p, int e, int w, int r) {
+    int pos = ((pid << 10) + page) << 2;
+    int data = (frame << 4) + (p << 3) + (e << 2) + (w << 1) + r;
+
+    unsigned int* posInt = (unsigned int*) (OS_MEM + pos);
+    posInt[0] = data;
+}
+
+int getPid() {
+    int start = 1 << 22;
+    for(int i = 0; i < 100; i++) {
+        int add = start + i;
+        if(OS_MEM[add] == 0)  {
+            OS_MEM[add] = 1;
+            return add;
+        }
+    }
+
+    return -1;
+}
+
+int getPfn() {
+    int start = 1 << 23;
+    for(int i = 0; i < (1 << 15); i++) {
+        int add = start + i;
+        if(OS_MEM[add] == 0) {
+            OS_MEM[add] = 1;
+            return add;
+        }
+    }
+
+    return -1;
+}
+
+int getFrameAdd(int pid, int vAdd) {
+    return 0;
+}
+
+// ------------------------------
 // ----------------------------------- Functions for managing memory --------------------------------- //
 
 /**
@@ -81,7 +124,32 @@ int create_ps(int code_size, int ro_data_size, int rw_data_size,
                  int max_stack_size, unsigned char* code_and_ro_data) 
 {   
     // TODO student
-    return 0;
+    int pid = getPid();
+    int vpn = 0;
+    for(int i = 0; i < code_size/PAGE_SIZE; i++, vpn++) {
+        int pfn = getPfn();
+        setMem(pid, vpn, pfn, 1, 1, 0, 1);
+        memcpy(PS_MEM + pfn * PAGE_SIZE, code_and_ro_data + i*PAGE_SIZE, sizeof(unsigned char) * PAGE_SIZE);
+    }
+
+    for(int i = 0; i < ro_data_size/PAGE_SIZE; i++, vpn++) {
+        int pfn = getPfn();
+        setMem(pid, vpn, pfn, 1, 0, 0, 1);
+        memcpy(PS_MEM + pfn * PAGE_SIZE, code_and_ro_data + code_size + i*(PAGE_SIZE), sizeof(unsigned char) * PAGE_SIZE);
+    }
+
+    for(int i = 0; i < rw_data_size/PAGE_SIZE; i++, vpn++) {
+        int pfn = getPfn();
+        setMem(pid, vpn, pfn, 1, 0, 1, 1);
+    }
+
+    vpn = PS_VIRTUAL_MEM_SIZE - max_stack_size;
+    for(int i = 0; i < max_stack_size/PAGE_SIZE; i++, vpn++) {
+        int pfn = getPfn();
+        setMem(pid, vpn, pfn, 1, 0, 1, 1);
+    }
+
+    return pid;
 }
 
 /**
@@ -122,6 +190,11 @@ int fork_ps(int pid) {
 void allocate_pages(int pid, int vmem_addr, int num_pages, int flags) 
 {
    // TODO student
+   /*
+    for all pages
+        if frame is present -- that is it is used -- error
+        else assign memory
+   */
 }
 
 
@@ -147,6 +220,21 @@ void deallocate_pages(int pid, int vmem_addr, int num_pages)
 unsigned char read_mem(int pid, int vmem_addr) 
 {
     // TODO: student
+    int vpn = vmem_addr/PAGE_SIZE;
+    int offset = (vmem_addr & ((1 << 12) - 1));
+
+    int key = ((pid << 10) + vpn) << 2;
+    unsigned int value = OS_MEM[key];
+
+    if(is_present(value) && is_readable(value)) {
+        int pfn = value >> 4;
+        int address = pfn * PAGE_SIZE + offset;
+        return PS_MEM[address];
+    } else {
+        error_no = ERR_SEG_FAULT;
+        exit_ps(pid);
+    }
+
     return 0;
 }
 
@@ -178,6 +266,8 @@ int pte_to_frame_num(page_table_entry pte)
 // 0 otherwise
 int is_readable(page_table_entry pte) {
     // TODO: student
+    if(pte & 1 > 0) 
+        return 1;
     return 0;
 }
 
@@ -185,6 +275,8 @@ int is_readable(page_table_entry pte) {
 // 0 otherwise
 int is_writeable(page_table_entry pte) {
     // TODO: student
+    if(pte & 2 > 0)
+        return 1;
     return 0;
 }
 
@@ -192,6 +284,8 @@ int is_writeable(page_table_entry pte) {
 // 0 otherwise
 int is_executable(page_table_entry pte) {
     // TODO: student
+    if(pte & 4 > 0)
+        return 1;
     return 0;
 }
 
@@ -200,6 +294,8 @@ int is_executable(page_table_entry pte) {
 // 0 otherwise
 int is_present(page_table_entry pte) {
     // TODO: student
+    if(pte & 8 > 0)
+        return 1; 
     return 0;
 }
 
@@ -226,6 +322,100 @@ void print_page_table(int pid)
                 );
     }
 
+}
+
+
+
+// -----------------------------------------------------------------------
+// add this to the mmu.c file and run
+
+#include <assert.h>
+
+#define MB (1024 * 1024)
+
+#define KB (1024)
+
+// just a random array to be passed to ps_create
+unsigned char code_ro_data[10 * MB];
+
+
+int main() {
+
+	os_init();
+    
+	code_ro_data[10 * PAGE_SIZE] = 'c';   // write 'c' at first byte in ro_mem
+	code_ro_data[10 * PAGE_SIZE + 1] = 'd'; // write 'd' at second byte in ro_mem
+
+	int p1 = create_ps(10 * PAGE_SIZE, 1 * PAGE_SIZE, 2 * PAGE_SIZE, 1 * MB, code_ro_data);
+
+	error_no = -1; // no error
+
+
+    
+	unsigned char c = read_mem(p1, 10 * PAGE_SIZE);
+
+	assert(c == 'c');
+
+	unsigned char d = read_mem(p1, 10 * PAGE_SIZE + 1);
+	assert(d == 'd');
+
+	assert(error_no == -1); // no error
+
+
+	write_mem(p1, 10 * PAGE_SIZE, 'd');   // write at ro_data
+
+	assert(error_no == ERR_SEG_FAULT);  
+
+
+	int p2 = create_ps(1 * MB, 0, 0, 1 * MB, code_ro_data);	// no ro_data, no rw_data
+
+	error_no = -1; // no error
+
+
+	int HEAP_BEGIN = 1 * MB;  // beginning of heap
+
+	// allocate 250 pages
+	allocate_pages(p2, HEAP_BEGIN, 250, O_READ | O_WRITE);
+
+	write_mem(p2, HEAP_BEGIN + 1, 'c');
+
+	write_mem(p2, HEAP_BEGIN + 2, 'd');
+
+	assert(read_mem(p2, HEAP_BEGIN + 1) == 'c');
+
+	assert(read_mem(p2, HEAP_BEGIN + 2) == 'd');
+
+	deallocate_pages(p2, HEAP_BEGIN, 10);
+
+	print_page_table(p2); // output should atleast indicate correct protection bits for the vmem of p2.
+
+	write_mem(p2, HEAP_BEGIN + 1, 'd'); // we deallocated first 10 pages after heap_begin
+
+	assert(error_no == ERR_SEG_FAULT);
+
+
+	int ps_pids[100];
+
+	// requesting 2 MB memory for 64 processes, should fill the complete 128 MB without complaining.   
+	for (int i = 0; i < 64; i++) {
+    	ps_pids[i] = create_ps(1 * MB, 0, 0, 1 * MB, code_ro_data);
+    	print_page_table(ps_pids[i]);	// should print non overlapping mappings.  
+	}
+
+
+	exit_ps(ps_pids[0]);
+    
+
+	ps_pids[0] = create_ps(1 * MB, 0, 0, 500 * KB, code_ro_data);
+
+	print_page_table(ps_pids[0]);   
+
+	// allocate 500 KB more
+	allocate_pages(ps_pids[0], 1 * MB, 125, O_READ | O_READ | O_EX);
+
+	for (int i = 0; i < 64; i++) {
+    	print_page_table(ps_pids[i]);	// should print non overlapping mappings.  
+	}
 }
 
 
